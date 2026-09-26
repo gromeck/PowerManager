@@ -4,7 +4,7 @@
 set -euo pipefail
 
 PROJECT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-SOURCE_FILE="$PROJECT_DIR/web/ConradPowerManager.svg"
+SOURCE_FILE="$PROJECT_DIR/Resources/Logo/ConradPowerManager.svg"
 TARGET_FILE="$PROJECT_DIR/web/logo.css"
 
 if ! grep -Eq '^[[:space:]]*<svg([[:space:]>]|$)' "$SOURCE_FILE"; then

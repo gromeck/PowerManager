@@ -57,6 +57,7 @@ class PowerManager extends HTMLElement {
         #io.ok { background: #e4f3eb; color: #17603a; }
         #message { min-height: 20px; margin: 8px 0; font-size: 13px; }
         footer { color: #586779; font-size: 12px; }
+        footer a { color: inherit; }
         details { margin: 12px 0; }
         summary { cursor: pointer; font-weight: 600; }
         .log-tools { display: flex; gap: 8px; margin: 10px 0; align-items: center; flex-wrap: wrap; }
@@ -107,7 +108,7 @@ class PowerManager extends HTMLElement {
         </div>
         <pre id="live-log" aria-label="Live device log" tabindex="0"></pre>
       </details>
-      <footer></footer>`;
+      <footer><span id="firmware-version"></span> · <a href="https://github.com/gromeck/PowerManager" target="_blank" rel="noopener noreferrer">GitHub</a></footer>`;
     const storedTheme = localStorage.getItem("powermanager-theme");
     this.theme = storedTheme === "light" || storedTheme === "dark"
       ? storedTheme
@@ -118,7 +119,7 @@ class PowerManager extends HTMLElement {
       localStorage.setItem("powermanager-theme", this.theme);
       this.applyTheme();
     });
-    this.querySelector("footer").textContent = firmwareVersion;
+    this.querySelector("#firmware-version").textContent = firmwareVersion;
     this.querySelector("#log-pause").addEventListener("click", () => {
       this.logPaused = !this.logPaused;
       this.querySelector("#log-pause").textContent = this.logPaused ? "Resume" : "Pause";

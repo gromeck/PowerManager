@@ -9,4 +9,5 @@
 /powermanager-stress.log
 **/__pycache__/
 /web/powermanager.generated.js
+/version.generated.yaml
 *.swp

@@ -7,6 +7,7 @@
 # This version starts ALL OFF; uninterrupted relay operation is NOT implemented.
 substitutions:
   name: powermanager
+  firmware_version: !include version.generated.yaml
   mqtt_broker: fhem.site
   mqtt_reboot_timeout: 0s
   esp32_cpu_frequency: 240MHz
@@ -167,6 +168,10 @@ mqtt:
   # Broker outages must never cause automatic reboots.
   reboot_timeout: ${mqtt_reboot_timeout}
   on_connect:
+    - mqtt.publish:
+        topic: ${name}/version
+        payload: ${firmware_version}
+        retain: true
     - if:
         condition:
           lambda: return !id(ota_in_progress);
