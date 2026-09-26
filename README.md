@@ -4,7 +4,7 @@
 
 # PowerManager — Retrofit
 
-ESPHome configuration for a WT32-ETH01 running ESPHome in a Conrad PowerManager.
+ESPHome configuration for a WT32-ETH01 running [ESPHome](https://esphome.io/) in a [Conrad](https://www.conrad.de/) PowerManager.
 
 The Conrad PowerManager is a device which controls 7 sockets to power other
 devices. On the front there is a MAIN toggle button and one toggle button for each
