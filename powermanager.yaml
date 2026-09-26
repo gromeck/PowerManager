@@ -1,0 +1,428 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+# Conrad Power Manager MK.II -- Bench V1
+# P0 = Main, P1..P7 = CH1..CH7 on all three PCF8574.
+# Assumption to verify on bench: relay inputs are LOW-active.
+# ATTENTION: stock PCF8574 setup rewrites outputs on ESP reset/OTA.
+# This version starts ALL OFF; uninterrupted relay operation is NOT implemented.
+substitutions:
+  name: powermanager
+  mqtt_broker: fhem.site
+  mqtt_reboot_timeout: 0s
+  esp32_cpu_frequency: 240MHz
+  i2c_frequency: 100kHz
+  status_to_relay_on_delay: 100ms
+  status_to_relay_off_delay: 100ms
+  all_off_channel_delay: 50ms
+  button_debounce_time: 50ms
+  io_status_check_interval: 1s
+  io_status_heartbeat_interval: 10min
+
+packages:
+  channel_1: !include {file: channel.yaml, vars: {channel: 1}}
+  channel_2: !include {file: channel.yaml, vars: {channel: 2}}
+  channel_3: !include {file: channel.yaml, vars: {channel: 3}}
+  channel_4: !include {file: channel.yaml, vars: {channel: 4}}
+  channel_5: !include {file: channel.yaml, vars: {channel: 5}}
+  channel_6: !include {file: channel.yaml, vars: {channel: 6}}
+  channel_7: !include {file: channel.yaml, vars: {channel: 7}}
+
+# Temporary local override adds address/operation/data/error diagnostics to
+# the stock ESPHome PCF8574 driver without changing its behavior.
+external_components:
+  - source:
+      type: local
+      path: components
+    components: [pcf8574]
+
+esphome:
+  name: ${name}
+  on_boot:
+    priority: -100
+    then:
+      - logger.log: "Bench V1 ready; all relays start OFF"
+
+esp32:
+  board: wt32-eth01
+  cpu_frequency: ${esp32_cpu_frequency}
+  framework:
+    type: esp-idf
+
+logger:
+  level: INFO
+
+# Existing bench setting; set a password before regular use.
+ota:
+  - platform: esphome
+    password: ""
+    port: 3232
+    on_begin:
+      - logger.log: "OTA update started"
+      - lambda: |-
+          id(ota_in_progress) = true;
+          id(ota_status_led_state) = false;
+          id(status_mqtt_led).turn_off();
+    on_progress:
+      - lambda: |-
+          id(ota_status_led_state) = !id(ota_status_led_state);
+          if (id(ota_status_led_state))
+            id(status_mqtt_led).turn_on();
+          else
+            id(status_mqtt_led).turn_off();
+    on_end:
+      - lambda: id(ota_in_progress) = false;
+      - script.execute: restore_mqtt_status_led
+    on_abort:
+      - lambda: id(ota_in_progress) = false;
+      - script.execute: restore_mqtt_status_led
+    on_error:
+      - lambda: id(ota_in_progress) = false;
+      - script.execute: restore_mqtt_status_led
+
+# No native API: local operation must not depend on an API client.
+ethernet:
+  type: LAN8720
+  mdc_pin: GPIO23
+  mdio_pin: GPIO18
+  clk:
+    pin: GPIO0
+    mode: CLK_EXT_IN
+  phy_addr: 1
+  power_pin: GPIO16
+  # Connected means IP connectivity, not merely physical link.
+  on_connect:
+    - output.turn_on: status_lan_led
+  on_disconnect:
+    - output.turn_off: status_lan_led
+
+# Serve the UI from the ESP itself, also without internet access.
+web_server:
+  port: 80
+  version: 3
+  # Embed the compact UI instead of the stock frontend; no external assets.
+  local: false
+  js_url: ""
+  css_url: ""
+  js_include: web/powermanager.generated.js
+  css_include: web/logo.css
+  include_internal: false
+  log: true
+  sorting_groups:
+    - id: web_channel_0
+      name: "MAIN"
+      sorting_weight: 0
+    - id: web_channel_1
+      name: "CH 1"
+      sorting_weight: 1
+    - id: web_channel_2
+      name: "CH 2"
+      sorting_weight: 2
+    - id: web_channel_3
+      name: "CH 3"
+      sorting_weight: 3
+    - id: web_channel_4
+      name: "CH 4"
+      sorting_weight: 4
+    - id: web_channel_5
+      name: "CH 5"
+      sorting_weight: 5
+    - id: web_channel_6
+      name: "CH 6"
+      sorting_weight: 6
+    - id: web_channel_7
+      name: "CH 7"
+      sorting_weight: 7
+
+# Time synchronization, matching gmeter.
+time:
+  - platform: sntp
+    id: sntp_time
+    timezone: Europe/Berlin
+    servers:
+      - ntp.site
+
+i2c:
+  sda: GPIO33
+  scl: GPIO32
+  sda_pullup_enabled: false
+  scl_pullup_enabled: false
+  scan: true
+  frequency: ${i2c_frequency}
+
+pcf8574:
+  - id: buttons_pcf
+    address: 0x20
+    interrupt_pin: GPIO35
+  - id: leds_pcf
+    address: 0x21
+  - id: relays_pcf
+    address: 0x22
+
+mqtt:
+  broker: ${mqtt_broker}
+  client_id: ${name}
+  topic_prefix: ${name}
+  discovery: false
+  log_topic: null
+  # Broker outages must never cause automatic reboots.
+  reboot_timeout: ${mqtt_reboot_timeout}
+  on_connect:
+    - if:
+        condition:
+          lambda: return !id(ota_in_progress);
+        then:
+          - output.turn_on: status_mqtt_led
+  on_disconnect:
+    - if:
+        condition:
+          lambda: return !id(ota_in_progress);
+        then:
+          - output.turn_off: status_mqtt_led
+
+globals:
+  - id: ota_in_progress
+    type: bool
+    restore_value: false
+    initial_value: "false"
+  - id: ota_status_led_state
+    type: bool
+    restore_value: false
+    initial_value: "false"
+
+output:
+  - platform: gpio
+    id: status_lan_led
+    pin: GPIO4
+  - platform: gpio
+    id: status_mqtt_led
+    pin: GPIO14
+
+  - platform: gpio
+    id: front_led_0
+    pin:
+      pcf8574: leds_pcf
+      number: 0
+      mode: OUTPUT
+      inverted: true
+
+# Main waits until active channels have been switched off in sequence.
+script:
+  - id: restore_mqtt_status_led
+    mode: restart
+    then:
+      - if:
+          condition:
+            mqtt.connected:
+          then:
+            - output.turn_on: status_mqtt_led
+          else:
+            - output.turn_off: status_mqtt_led
+
+  - id: publish_io_status
+    mode: restart
+    parameters:
+      force: bool
+    then:
+      - lambda: |-
+          std::string errors;
+          if (id(buttons_pcf).is_failed() || id(buttons_pcf).status_has_warning())
+            errors += "Buttons 0x20; ";
+          if (id(leds_pcf).is_failed() || id(leds_pcf).status_has_warning())
+            errors += "LEDs 0x21; ";
+          if (id(relays_pcf).is_failed() || id(relays_pcf).status_has_warning())
+            errors += "Relays 0x22; ";
+
+          const std::string current = errors.empty()
+              ? "OK - no driver error"
+              : std::string("ERROR - ON blocked: ") + errors;
+          if (force || !id(io_status).has_state() || id(io_status).state != current)
+            id(io_status).publish_state(current);
+
+  - id: all_channels_off_immediate
+    then:
+      - switch.turn_off: channel_7
+      - switch.turn_off: channel_6
+      - switch.turn_off: channel_5
+      - switch.turn_off: channel_4
+      - switch.turn_off: channel_3
+      - switch.turn_off: channel_2
+      - switch.turn_off: channel_1
+      - script.wait: set_relay_7
+      - script.wait: set_relay_6
+      - script.wait: set_relay_5
+      - script.wait: set_relay_4
+      - script.wait: set_relay_3
+      - script.wait: set_relay_2
+      - script.wait: set_relay_1
+
+  - id: all_channels_off_sequential
+    then:
+      - switch.turn_off: channel_7
+      - delay: ${all_off_channel_delay}
+      - switch.turn_off: channel_6
+      - delay: ${all_off_channel_delay}
+      - switch.turn_off: channel_5
+      - delay: ${all_off_channel_delay}
+      - switch.turn_off: channel_4
+      - delay: ${all_off_channel_delay}
+      - switch.turn_off: channel_3
+      - delay: ${all_off_channel_delay}
+      - switch.turn_off: channel_2
+      - delay: ${all_off_channel_delay}
+      - switch.turn_off: channel_1
+      - script.wait: set_relay_1
+
+  - id: set_main_relay
+    mode: restart
+    parameters:
+      target_state: bool
+    then:
+      - if:
+          condition:
+            lambda: return target_state;
+          then:
+            - delay: ${status_to_relay_on_delay}
+            - script.wait: all_channels_off_immediate
+            - switch.turn_on: relay_0
+          else:
+            - delay: ${status_to_relay_off_delay}
+            - script.wait: all_channels_off_sequential
+            - switch.turn_off: relay_0
+            - output.turn_off: front_led_0
+
+switch:
+  # Physical relays are internal; all user commands use guarded switches below.
+  - platform: gpio
+    id: relay_0
+    internal: true
+    restore_mode: ALWAYS_OFF
+    pin:
+      pcf8574: relays_pcf
+      number: 0
+      mode: OUTPUT
+      inverted: true
+
+  - platform: template
+    id: channel_0
+    name: "MAIN"
+    web_server:
+      sorting_group_id: web_channel_0
+      sorting_weight: 0
+    restore_mode: DISABLED
+    state_topic: ${name}/0/state
+    command_topic: ${name}/0/set
+    turn_on_action:
+      - if:
+          condition:
+            lambda: &io_ready |-
+              return !id(buttons_pcf).is_failed() && !id(buttons_pcf).status_has_warning()
+                  && !id(leds_pcf).is_failed() && !id(leds_pcf).status_has_warning()
+                  && !id(relays_pcf).is_failed() && !id(relays_pcf).status_has_warning();
+          then:
+            # Repeated ON must not reset channels while MAIN is already ON.
+            - if:
+                condition:
+                  switch.is_off: channel_0
+                then:
+                  - script.execute: all_channels_off_immediate
+                  - script.execute:
+                      id: set_main_relay
+                      target_state: true
+                  - script.wait: set_main_relay
+                  - output.turn_on: front_led_0
+                  - switch.template.publish:
+                      id: channel_0
+                      state: ON
+          else:
+            - logger.log:
+                level: WARN
+                format: "ON blocked: I/O expander unavailable or reporting an error"
+            - switch.template.publish:
+                id: channel_0
+                state: !lambda return id(channel_0).state;
+    turn_off_action:
+      - switch.template.publish:
+          id: channel_0
+          state: OFF
+      - script.execute: all_channels_off_sequential
+      - script.execute:
+          id: set_main_relay
+          target_state: false
+
+# Driver diagnostics, not feedback from the physical relay contacts.
+text_sensor:
+  - platform: template
+    id: io_status
+    name: "IO Status"
+    entity_category: diagnostic
+    update_interval: never
+
+interval:
+  - interval: ${io_status_check_interval}
+    then:
+      - script.execute:
+          id: publish_io_status
+          force: false
+  - interval: ${io_status_heartbeat_interval}
+    then:
+      - script.execute:
+          id: publish_io_status
+          force: true
+
+# Web actions use the same guarded switches as MQTT and front buttons.
+button:
+  - platform: template
+    id: web_0_on
+    name: "MAIN ON"
+    web_server:
+      sorting_group_id: web_channel_0
+      sorting_weight: 1
+    on_press:
+      - switch.turn_on: channel_0
+
+  - platform: template
+    id: web_0_off
+    name: "MAIN OFF"
+    web_server:
+      sorting_group_id: web_channel_0
+      sorting_weight: 2
+    on_press:
+      - switch.turn_off: channel_0
+
+  - platform: template
+    id: web_0_toggle
+    name: "MAIN TOGGLE"
+    web_server:
+      sorting_group_id: web_channel_0
+      sorting_weight: 3
+    on_press:
+      # Read the relay state directly, as with the physical front buttons.
+      - if:
+          condition:
+            switch.is_on: channel_0
+          then:
+            - switch.turn_off: channel_0
+          else:
+            - switch.turn_on: channel_0
+
+binary_sensor:
+  # One action per debounced press; holding a button does not repeat.
+  # Long-press semantics are intentionally deferred to a later version.
+  - platform: gpio
+    id: button_0
+    internal: true
+    pin:
+      pcf8574: buttons_pcf
+      number: 0
+      mode: INPUT
+      inverted: true
+    filters:
+      - delayed_on_off: ${button_debounce_time}
+    on_press:
+      - if:
+          condition:
+            switch.is_on: channel_0
+          then:
+            - switch.turn_off: channel_0
+          else:
+            - switch.turn_on: channel_0

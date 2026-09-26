@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+# Gitignore settings for ESPHome
+# This is an example and may include too much for your use-case.
+# You can modify this file to suit your needs.
+/.esphome/
+/secrets.yaml
+/venv/
+/powermanager-stress.log
+**/__pycache__/
+/web/powermanager.generated.js
+*.swp

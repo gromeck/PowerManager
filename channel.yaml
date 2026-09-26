@@ -1,0 +1,139 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+output:
+  - platform: gpio
+    id: front_led_${channel}
+    pin:
+      pcf8574: leds_pcf
+      number: ${channel}
+      mode: OUTPUT
+      inverted: true
+
+script:
+  - id: set_relay_${channel}
+    mode: restart
+    parameters:
+      target_state: bool
+    then:
+      - if:
+          condition:
+            lambda: return target_state;
+          then:
+            - delay: ${status_to_relay_on_delay}
+            - switch.turn_on: relay_${channel}
+          else:
+            - delay: ${status_to_relay_off_delay}
+            - switch.turn_off: relay_${channel}
+
+switch:
+  - platform: gpio
+    id: relay_${channel}
+    internal: true
+    restore_mode: ALWAYS_OFF
+    pin:
+      pcf8574: relays_pcf
+      number: ${channel}
+      mode: OUTPUT
+      inverted: true
+
+  - platform: template
+    id: channel_${channel}
+    name: "CH ${channel}"
+    web_server:
+      sorting_group_id: web_channel_${channel}
+      sorting_weight: 0
+    restore_mode: DISABLED
+    state_topic: ${name}/${channel}/state
+    command_topic: ${name}/${channel}/set
+    turn_on_action:
+      - if:
+          condition:
+            lambda: |-
+              return !id(buttons_pcf).is_failed() && !id(buttons_pcf).status_has_warning()
+                  && !id(leds_pcf).is_failed() && !id(leds_pcf).status_has_warning()
+                  && !id(relays_pcf).is_failed() && !id(relays_pcf).status_has_warning();
+          then:
+            - if:
+                condition:
+                  switch.is_on: relay_0
+                then:
+                  - switch.template.publish:
+                      id: channel_${channel}
+                      state: ON
+                  - output.turn_on: front_led_${channel}
+                  - script.execute:
+                      id: set_relay_${channel}
+                      target_state: true
+                else:
+                  - switch.template.publish:
+                      id: channel_${channel}
+                      state: OFF
+          else:
+            - logger.log:
+                level: WARN
+                format: "ON blocked: I/O expander unavailable or reporting an error"
+            - switch.template.publish:
+                id: channel_${channel}
+                state: !lambda return id(channel_${channel}).state;
+    turn_off_action:
+      - switch.template.publish:
+          id: channel_${channel}
+          state: OFF
+      - output.turn_off: front_led_${channel}
+      - script.execute:
+          id: set_relay_${channel}
+          target_state: false
+
+button:
+  - platform: template
+    id: web_${channel}_on
+    name: "CH ${channel} ON"
+    web_server:
+      sorting_group_id: web_channel_${channel}
+      sorting_weight: 1
+    on_press:
+      - switch.turn_on: channel_${channel}
+
+  - platform: template
+    id: web_${channel}_off
+    name: "CH ${channel} OFF"
+    web_server:
+      sorting_group_id: web_channel_${channel}
+      sorting_weight: 2
+    on_press:
+      - switch.turn_off: channel_${channel}
+
+  - platform: template
+    id: web_${channel}_toggle
+    name: "CH ${channel} TOGGLE"
+    web_server:
+      sorting_group_id: web_channel_${channel}
+      sorting_weight: 3
+    on_press:
+      - if:
+          condition:
+            switch.is_on: channel_${channel}
+          then:
+            - switch.turn_off: channel_${channel}
+          else:
+            - switch.turn_on: channel_${channel}
+
+binary_sensor:
+  - platform: gpio
+    id: button_${channel}
+    internal: true
+    pin:
+      pcf8574: buttons_pcf
+      number: ${channel}
+      mode: INPUT
+      inverted: true
+    filters:
+      - delayed_on_off: ${button_debounce_time}
+    on_press:
+      - if:
+          condition:
+            switch.is_on: channel_${channel}
+          then:
+            - switch.turn_off: channel_${channel}
+          else:
+            - switch.turn_on: channel_${channel}
